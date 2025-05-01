@@ -1,594 +1,567 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using System;
 
+/// <summary>
+/// Bu script, DFS (Derinlik Öncelikli Arama) algoritması kullanarak 
+/// 3 boyutlu bir labirent oluşturur ve görselleştirir.
+/// Seed tabanlı rastgele labirent üretimi sağlar.
+/// </summary>
 public class MazeGenerator : MonoBehaviour
 {
-    public int width = 15;
-    public int height = 15;
-
-    public GameObject floorPrefab;
-    public GameObject straightWallPrefab;
-    public GameObject windowWallPrefab;
-    public GameObject tWallPrefab;
-    public GameObject lWallPrefab;
-    public GameObject startMarkerPrefab; // Başlangıç noktası işaretleyici
-    public GameObject endMarkerPrefab;   // Bitiş noktası işaretleyici
-
-    public float cellSize = 4f;
-    public float windowWallChance = 0.3f; // %30 pencere duvar şansı
-    public float crackedWallChance = 0.2f; // %20 çatlak duvar şansı
-
-    // Labirent verilerini saklamak için veri yapıları
-    private Dictionary<Vector2Int, Cell> maze = new Dictionary<Vector2Int, Cell>();
-    private Dictionary<Vector2Int, bool> wallPositions = new Dictionary<Vector2Int, bool>();
+    [Header("Maze Settings")]
+    public int width = 10;        // Labirentin genişliği (hücre sayısı)
+    public int height = 10;       // Labirentin yüksekliği (hücre sayısı)
+    public float cellSize = 2f;   // Her bir hücrenin boyutu (Unity birimleri)
+    public int seed = 0;          // Labirent oluşturma için seed değeri
+    public bool useRandomSeed = true; // Rastgele seed kullanılıp kullanılmayacağı
     
-    // Başlangıç ve bitiş noktası koordinatları (grid koordinatları)
-    private Vector2Int startPoint;
-    private Vector2Int endPoint;
-
-    // Hücre verilerini depolamak için yardımcı sınıf
+    [Header("Prefabs")]
+    public GameObject wallPrefab;   // Duvar için kullanılacak prefab
+    public GameObject floorPrefab;  // Zemin için kullanılacak prefab
+    public GameObject cornerPrefab; // Köşe noktaları için kullanılacak prefab
+    public GameObject startMarker;  // Başlangıç noktasını işaretlemek için prefab
+    public GameObject endMarker;    // Bitiş noktasını işaretlemek için prefab
+    
+    [Header("Parent Objects")]
+    public Transform wallsParent;   // Tüm duvarların parent objesi (hiyerarşi için)
+    public Transform floorsParent;  // Tüm zeminlerin parent objesi (hiyerarşi için)
+    public Transform cornersParent; // Tüm köşelerin parent objesi (hiyerarşi için)
+    
+    // Labirentdeki her bir hücreyi temsil eden iç sınıf
     private class Cell
     {
-        public bool visited = false;
-        public bool[] walls = new bool[4] { true, true, true, true }; // Kuzey, Doğu, Güney, Batı
-    }
-
-    private void Start()
-    {
-        InitializeMaze();
-        GenerateMaze();
-        BuildMaze();
-    }
-
-    // Labirent veri yapısını başlatır
-    void InitializeMaze()
-    {
-        // Tüm hücreleri duvarlarla çevrili olarak oluştur
-        for (int x = 0; x < width; x++)
+        public int x, y;  // Hücrenin grid koordinatları
+        public bool[] walls = new bool[4] {true, true, true, true}; // Duvarlar: Kuzey, Doğu, Güney, Batı
+        public bool visited = false; // DFS algoritması için ziyaret edilme durumu
+        
+        public Cell(int x, int y)
         {
-            for (int z = 0; z < height; z++)
+            this.x = x;
+            this.y = y;
+        }
+    }
+    
+    // Yön vektörleri: Kuzey, Doğu, Güney, Batı
+    // Bu yönler, komşu hücreleri bulmak için kullanılır
+    private Vector2Int[] directions = new Vector2Int[4] {
+        new Vector2Int(0, 1),   // Kuzey (0)
+        new Vector2Int(1, 0),   // Doğu (1)
+        new Vector2Int(0, -1),  // Güney (2)
+        new Vector2Int(-1, 0)   // Batı (3)
+    };
+    
+    private Cell[,] maze;             // Labirent hücrelerinin 2D grid yapısı
+    private System.Random rand;      // Seed tabanlı rastgele sayı üreteci
+    private Vector2Int startPos;     // Başlangıç pozisyonu (genellikle 0,0)
+    private Vector2Int endPos;       // Bitiş pozisyonu (genellikle width-1,height-1)
+    
+    // Unity başlangıç fonksiyonu - Oyun başladığında labirenti oluşturur
+    void Start()
+    {
+        GenerateMaze();
+    }
+    
+    /// <summary>
+    /// Labirent oluşturma ana fonksiyonu.
+    /// Tüm adımları sırasıyla çağırır.
+    /// </summary>
+    public void GenerateMaze()
+    {
+        ClearMaze();        // Eski labirenti temizle
+        InitializeMaze();   // Yeni labirent veri yapısını hazırla
+        RunDFSAlgorithm();  // DFS algoritmasını çalıştır
+        BuildMaze();        // Görsel labirenti inşa et
+    }
+    
+    /// <summary>
+    /// Daha önce oluşturulmuş labirenti temizler.
+    /// Tüm duvar, zemin ve köşe objelerini yok eder.
+    /// </summary>
+    private void ClearMaze()
+    {
+        // Eğer duvarlar parent objesi varsa, tüm çocuk objelerini yok et
+        if (wallsParent != null)
+        {
+            foreach (Transform child in wallsParent)
             {
-                maze[new Vector2Int(x, z)] = new Cell();
+                Destroy(child.gameObject);
             }
         }
-
-        // Başlangıç noktası: sağ alt köşe (grid koordinatları)
-        startPoint = new Vector2Int(width - 1, 0);
         
-        // Bitiş noktası: sol üst köşe (grid koordinatları)
-        endPoint = new Vector2Int(0, height - 1);
-        
-        // Duvar konumlarını izlemek için dictionary'yi temizle
-        wallPositions.Clear();
-        
-        Debug.Log("Labirent boyutu: " + width + "x" + height + " hücre");
-        Debug.Log("Hücre boyutu: " + cellSize + " birim");
-    }
-
-    // Derinlik öncelikli arama ile labirent oluştur
-    void GenerateMaze()
-    {
-        Stack<Vector2Int> stack = new Stack<Vector2Int>();
-        Vector2Int current = startPoint;
-        maze[current].visited = true;
-
-        // Derinlik öncelikli arama (DFS) ile labirent oluştur
-        do
+        // Eğer zeminler parent objesi varsa, tüm çocuk objelerini yok et
+        if (floorsParent != null)
         {
-            List<Vector2Int> unvisitedNeighbors = GetUnvisitedNeighbors(current);
-
+            foreach (Transform child in floorsParent)
+            {
+                Destroy(child.gameObject);
+            }
+        }
+        
+        // Eğer köşeler parent objesi varsa, tüm çocuk objelerini yok et
+        if (cornersParent != null)
+        {
+            foreach (Transform child in cornersParent)
+            {
+                Destroy(child.gameObject);
+            }
+        }
+        
+        // Başlangıç ve bitiş işaretçileri transform altında olduğu için temizle
+        foreach (Transform child in transform)
+        {
+            if (child != wallsParent && child != floorsParent && child != cornersParent)
+            {
+                Destroy(child.gameObject);
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Labirent veri yapısını oluşturur ve hazırlar.
+    /// Seed değerini ayarlar, grid yapısını oluşturur ve başlangıç/bitiş konumlarını belirler.
+    /// </summary>
+    private void InitializeMaze()
+    {
+        // Seed ile başlat - rastgele seed isteniyorsa yeni bir seed oluştur
+        if (useRandomSeed)
+        {
+            seed = UnityEngine.Random.Range(1, 100000);
+        }
+        // Seed ile rastgele sayı üretecini başlat
+        rand = new System.Random(seed);
+        Debug.Log("Using seed: " + seed);
+        
+        // Labirent grid yapısını oluştur
+        maze = new Cell[width, height];
+        for (int x = 0; x < width; x++)
+        {
+            for (int y = 0; y < height; y++)
+            {
+                maze[x, y] = new Cell(x, y);
+            }
+        }
+        
+        // Başlangıç ve bitiş pozisyonlarını ayarla
+        // Genellikle başlangıç sol alt, bitiş sağ üst köşededir
+        startPos = new Vector2Int(0, 0);
+        endPos = new Vector2Int(width - 1, height - 1);
+    }
+    
+    /// <summary>
+    /// Derinlik Öncelikli Arama (DFS) algoritmasını çalıştırır.
+    /// Bu algoritma labirent oluşturmak için duvarları kaldırarak yollar oluşturur.
+    /// </summary>
+    private void RunDFSAlgorithm()
+    {
+        // Hücreleri takip etmek için yığın (stack) veri yapısı kullan
+        Stack<Cell> cellStack = new Stack<Cell>();
+        
+        // Başlangıç hücresinden başla
+        Cell currentCell = maze[startPos.x, startPos.y];
+        currentCell.visited = true;
+        
+        // DFS algoritması
+        while (true)
+        {
+            // Mevcut hücrenin ziyaret edilmemiş komşularını bul
+            List<Cell> unvisitedNeighbors = GetUnvisitedNeighbors(currentCell);
+            
             if (unvisitedNeighbors.Count > 0)
             {
-                // Rastgele komşu seç
-                Vector2Int next = unvisitedNeighbors[Random.Range(0, unvisitedNeighbors.Count)];
-                stack.Push(current);
-
-                // Seçilen komşuya duvarı yıkarak geçiş aç
-                RemoveWallBetween(current, next);
-
-                // Sonraki hücreye ilerle
-                current = next;
-                maze[current].visited = true;
+                // Rastgele bir ziyaret edilmemiş komşu seç
+                Cell nextCell = unvisitedNeighbors[rand.Next(unvisitedNeighbors.Count)];
+                
+                // Mevcut hücreyi yığına ekle (geri dönüş için)
+                cellStack.Push(currentCell);
+                
+                // Mevcut hücre ile seçilen komşu arasındaki duvarları kaldır
+                RemoveWalls(currentCell, nextCell);
+                
+                // Seçilen komşuyu mevcut hücre yap ve ziyaret edildi olarak işaretle
+                currentCell = nextCell;
+                currentCell.visited = true;
             }
-            else if (stack.Count > 0)
+            else if (cellStack.Count > 0)
             {
-                // Çıkmaz sokağa gelindiyse, geri dön
-                current = stack.Pop();
-            }
-        } while (stack.Count > 0);
-
-        // Başlangıç ve bitiş noktaları arasında yol olduğundan emin ol
-        EnsurePathFromStartToEnd();
-    }
-
-    // Belirtilen hücrenin ziyaret edilmemiş komşularını döndürür
-    List<Vector2Int> GetUnvisitedNeighbors(Vector2Int cell)
-    {
-        List<Vector2Int> neighbors = new List<Vector2Int>();
-        Vector2Int[] directions = new Vector2Int[]
-        {
-            new Vector2Int(0, 1),  // Kuzey
-            new Vector2Int(1, 0),  // Doğu
-            new Vector2Int(0, -1), // Güney
-            new Vector2Int(-1, 0)  // Batı
-        };
-
-        foreach (Vector2Int dir in directions)
-        {
-            Vector2Int neighbor = cell + dir;
-            // Labirent sınırları içindeki ziyaret edilmemiş komşuları ekle
-            if (neighbor.x >= 0 && neighbor.x < width && 
-                neighbor.y >= 0 && neighbor.y < height && 
-                !maze[neighbor].visited)
-            {
-                neighbors.Add(neighbor);
-            }
-        }
-
-        return neighbors;
-    }
-
-    // İki hücre arasındaki duvarı kaldırır
-    void RemoveWallBetween(Vector2Int a, Vector2Int b)
-    {
-        int dx = b.x - a.x;
-        int dy = b.y - a.y;
-
-        if (dx == 1)
-        {
-            maze[a].walls[1] = false; // A'nın doğu duvarını kaldır
-            maze[b].walls[3] = false; // B'nin batı duvarını kaldır
-        }
-        else if (dx == -1)
-        {
-            maze[a].walls[3] = false; // A'nın batı duvarını kaldır
-            maze[b].walls[1] = false; // B'nin doğu duvarını kaldır
-        }
-        else if (dy == 1)
-        {
-            maze[a].walls[0] = false; // A'nın kuzey duvarını kaldır
-            maze[b].walls[2] = false; // B'nin güney duvarını kaldır
-        }
-        else if (dy == -1)
-        {
-            maze[a].walls[2] = false; // A'nın güney duvarını kaldır
-            maze[b].walls[0] = false; // B'nin kuzey duvarını kaldır
-        }
-    }
-
-    // Başlangıç ve bitiş noktaları arasında ulaşılabilir bir yol oluştur
-    void EnsurePathFromStartToEnd()
-    {
-        // Başlangıç ve bitiş noktalarının dış duvarlarla bağlantısını aç
-
-        // Başlangıç noktası dış duvarı (sağ alt köşe - sağ duvarı)
-        maze[startPoint].walls[1] = false;
-
-        // Bitiş noktası dış duvarı (sol üst köşe - sol duvarı)
-        maze[endPoint].walls[3] = false;
-
-        // Acil durum: Özel yol oluştur
-        // Başlangıç ve bitiş noktaları arasında belirgin bir yol garantile
-        if (!IsPathExistsBetween(startPoint, endPoint))
-        {
-            CreateDirectPath(startPoint, endPoint);
-        }
-        
-        // Başlangıç ve bitiş noktalarını konsola yazdır (Debug amaçlı)
-        Debug.Log("Başlangıç noktası: " + startPoint + " konumunda");
-        Debug.Log("Bitiş noktası: " + endPoint + " konumunda");
-    }
-
-    // Başlangıç ve bitiş noktaları arasında doğrudan bir yol oluştur
-    void CreateDirectPath(Vector2Int start, Vector2Int end)
-    {
-        Vector2Int current = start;
-        
-        // Önce x ekseninde ilerle
-        while (current.x != end.x)
-        {
-            Vector2Int next = current;
-            if (current.x > end.x)
-            {
-                next.x--;
-                // Sol duvarı aç
-                maze[current].walls[3] = false;
-                // Sağ duvarı aç
-                maze[next].walls[1] = false;
+                // Geri izleme - Ziyaret edilmemiş komşu kalmadığında, yığından önceki hücreye dön
+                currentCell = cellStack.Pop();
             }
             else
             {
-                next.x++;
-                // Sağ duvarı aç
-                maze[current].walls[1] = false;
-                // Sol duvarı aç
-                maze[next].walls[3] = false;
-            }
-            current = next;
-        }
-        
-        // Sonra y ekseninde ilerle
-        while (current.y != end.y)
-        {
-            Vector2Int next = current;
-            if (current.y > end.y)
-            {
-                next.y--;
-                // Alt duvarı aç
-                maze[current].walls[2] = false;
-                // Üst duvarı aç
-                maze[next].walls[0] = false;
-            }
-            else
-            {
-                next.y++;
-                // Üst duvarı aç
-                maze[current].walls[0] = false;
-                // Alt duvarı aç
-                maze[next].walls[2] = false;
-            }
-            current = next;
-        }
-    }
-
-    // BFS algoritması ile iki nokta arasında yol olup olmadığını kontrol et
-    bool IsPathExistsBetween(Vector2Int start, Vector2Int end)
-    {
-        HashSet<Vector2Int> visited = new HashSet<Vector2Int>();
-        Queue<Vector2Int> queue = new Queue<Vector2Int>();
-        
-        queue.Enqueue(start);
-        visited.Add(start);
-        
-        while (queue.Count > 0)
-        {
-            Vector2Int current = queue.Dequeue();
-            
-            if (current.Equals(end))
-                return true;
-                
-            // Her dört yönü kontrol et
-            CheckDirection(current, 0, new Vector2Int(0, 1), visited, queue);  // Kuzey
-            CheckDirection(current, 1, new Vector2Int(1, 0), visited, queue);  // Doğu
-            CheckDirection(current, 2, new Vector2Int(0, -1), visited, queue); // Güney
-            CheckDirection(current, 3, new Vector2Int(-1, 0), visited, queue); // Batı
-        }
-        
-        return false;
-    }
-    
-    // Belirtilen yönde geçiş olup olmadığını kontrol et
-    void CheckDirection(Vector2Int current, int direction, Vector2Int offset, 
-                        HashSet<Vector2Int> visited, Queue<Vector2Int> queue)
-    {
-        // Bu yönde duvar yoksa
-        if (!maze[current].walls[direction])
-        {
-            Vector2Int neighbor = current + offset;
-            
-            // Sınırlar içindeyse ve daha önce ziyaret edilmediyse
-            if (neighbor.x >= 0 && neighbor.x < width && 
-                neighbor.y >= 0 && neighbor.y < height && 
-                !visited.Contains(neighbor))
-            {
-                visited.Add(neighbor);
-                queue.Enqueue(neighbor);
-            }
-        }
-    }
-
-    // Oluşturulan labirent verilerine göre fiziksel duvarları inşa et
-    void BuildMaze()
-    {
-        // Önce zemini oluştur
-        GenerateFloor();
-        
-        // Önce dış duvarları oluştur - bunu ayrı bir adım olarak yapalım
-        CreateOuterWalls();
-
-        // İç labirent duvarlarını oluştur
-        for (int x = 0; x < width; x++)
-        {
-            for (int z = 0; z < height; z++)
-            {
-                Vector2Int pos = new Vector2Int(x, z);
-                Cell cell = maze[pos];
-
-                // Kuzey duvarı (iç duvarlar için)
-                if (cell.walls[0] && z < height - 1)
-                {
-                    Vector3 wallPos = new Vector3(x * cellSize + cellSize / 2, 0, (z + 1) * cellSize - cellSize / 2);
-                    Vector2Int wallKey = new Vector2Int(x, z + 1);
-                    if (!wallPositions.ContainsKey(wallKey))
-                    {
-                        CreateWallPiece(wallPos, false);
-                        wallPositions[wallKey] = true;
-                    }
-                }
-
-                // Doğu duvarı (iç duvarlar için)
-                if (cell.walls[1] && x < width - 1)
-                {
-                    Vector3 wallPos = new Vector3((x + 1) * cellSize - cellSize / 2, 0, z * cellSize + cellSize / 2);
-                    Vector2Int wallKey = new Vector2Int(x + 1, z);
-                    if (!wallPositions.ContainsKey(wallKey))
-                    {
-                        CreateWallPiece(wallPos, true);
-                        wallPositions[wallKey] = true;
-                    }
-                }
-
-                // Not: Güney ve Batı duvarları komşu hücreler tarafından zaten kapsanıyor
-                // Bu nedenle burada özel olarak ele almıyoruz
-            }
-        }
-
-        // L-duvarları köşelerde oluştur
-        PlaceCornerWalls();
-        
-        // T-duvarları ve L-duvarları uygun yerlere yerleştir
-        PlaceSpecialWalls();
-        
-        // Başlangıç ve bitiş işaretleyicilerini yerleştir
-        PlaceStartAndEndMarkers();
-    }
-    
-    // Dış duvarları oluşturan fonksiyon
-    void CreateOuterWalls()
-    {
-        // Alt duvar (z = 0)
-        for (int x = 0; x < width; x++)
-        {
-            Vector3 wallPos = new Vector3(x * cellSize + cellSize / 2, 0, 0);
-            Vector2Int wallKey = new Vector2Int(x, -1);
-            if (!wallPositions.ContainsKey(wallKey))
-            {
-                CreateWallPiece(wallPos, false);
-                wallPositions[wallKey] = true;
-            }
-        }
-        
-        // Üst duvar (z = height)
-        for (int x = 0; x < width; x++)
-        {
-            Vector3 wallPos = new Vector3(x * cellSize + cellSize / 2, 0, height * cellSize);
-            Vector2Int wallKey = new Vector2Int(x, height);
-            if (!wallPositions.ContainsKey(wallKey))
-            {
-                CreateWallPiece(wallPos, false);
-                wallPositions[wallKey] = true;
-            }
-        }
-        
-        // Sol duvar (x = 0)
-        for (int z = 0; z < height; z++)
-        {
-            Vector3 wallPos = new Vector3(0, 0, z * cellSize + cellSize / 2);
-            Vector2Int wallKey = new Vector2Int(-1, z);
-            if (!wallPositions.ContainsKey(wallKey))
-            {
-                CreateWallPiece(wallPos, true);
-                wallPositions[wallKey] = true;
-            }
-        }
-        
-        // Sağ duvar (x = width)
-        for (int z = 0; z < height; z++)
-        {
-            Vector3 wallPos = new Vector3(width * cellSize, 0, z * cellSize + cellSize / 2);
-            Vector2Int wallKey = new Vector2Int(width, z);
-            if (!wallPositions.ContainsKey(wallKey))
-            {
-                CreateWallPiece(wallPos, true);
-                wallPositions[wallKey] = true;
-            }
-        }
-    }
-
-    // Zemini oluşturur
-    void GenerateFloor()
-    {
-        for (int x = 0; x < width; x++)
-        {
-            for (int z = 0; z < height; z++)
-            {
-                Vector3 position = new Vector3(x * cellSize, 0, z * cellSize);
-                Instantiate(floorPrefab, position, Quaternion.identity, transform);
-            }
-        }
-    }
-
-    // Duvar prefabı oluşturan ve kaydeden fonksiyon
-    void CreateWallPiece(Vector3 position, bool rotate90)
-    {
-        // Rastgele duvar tipi seç (normal, pencereli veya çatlak)
-        float randomValue = Random.value;
-        GameObject prefab = straightWallPrefab; // Varsayılan düz duvar
-        
-        if (randomValue < windowWallChance)
-        {
-            prefab = windowWallPrefab;
-        }
-        else if (randomValue < windowWallChance + crackedWallChance)
-        {
-            prefab = straightWallPrefab; // Çatlak duvar prefabınız varsa burada kullanabilirsiniz
-        }
-        
-        Quaternion rotation = rotate90 ? Quaternion.Euler(0, 90, 0) : Quaternion.identity;
-        Instantiate(prefab, position, rotation, transform);
-    }
-
-    // Dış köşelere L duvarları yerleştiren fonksiyon
-    void PlaceCornerWalls()
-    {
-        // Dış köşeler
-        CreateCorner(new Vector3(0, 0, 0), -90); // Sol-Alt köşe
-        CreateCorner(new Vector3(width * cellSize, 0, 0), 0);  // Sağ-Alt köşe
-        CreateCorner(new Vector3(0, 0, height * cellSize), 180); // Sol-Üst köşe
-        CreateCorner(new Vector3(width * cellSize, 0, height * cellSize), 90); // Sağ-Üst köşe
-        
-        // İç köşeleri kontrol et ve L duvarları yerleştir
-        for (int x = 0; x < width-1; x++)
-        {
-            for (int z = 0; z < height-1; z++)
-            {
-                Vector2Int pos = new Vector2Int(x, z);
-                CheckAndPlaceLWall(pos);
+                // Tüm hücreler ziyaret edildi, labirent tamamlandı
+                break;
             }
         }
     }
     
-    // Belirtilen konumda L-duvar gerekliliğini kontrol et ve yerleştir
-    void CheckAndPlaceLWall(Vector2Int pos)
+    /// <summary>
+    /// Belirtilen hücrenin ziyaret edilmemiş komşularını bulur.
+    /// DFS algoritması için gereklidir.
+    /// </summary>
+    /// <param name="cell">Komşuları bulunacak mevcut hücre</param>
+    /// <returns>Ziyaret edilmemiş komşu hücrelerin listesi</returns>
+    private List<Cell> GetUnvisitedNeighbors(Cell cell)
     {
-        int x = pos.x;
-        int z = pos.y;
+        List<Cell> neighbors = new List<Cell>();
         
-        Cell current = maze[pos];
-        Cell right = maze.ContainsKey(new Vector2Int(x+1, z)) ? maze[new Vector2Int(x+1, z)] : null;
-        Cell up = maze.ContainsKey(new Vector2Int(x, z+1)) ? maze[new Vector2Int(x, z+1)] : null;
-        Cell upRight = maze.ContainsKey(new Vector2Int(x+1, z+1)) ? maze[new Vector2Int(x+1, z+1)] : null;
-        
-        // Duvarların L şeklini oluşturup oluşturmadığını kontrol et
-        if (current != null && right != null && up != null && upRight != null)
-        {
-            // Sağ üst köşede L duvar olmalı mı?
-            if (!current.walls[0] && !current.walls[1] && up.walls[1] && right.walls[0])
-            {
-                Vector3 cornerPos = new Vector3((x+1) * cellSize, 0, (z+1) * cellSize);
-                Vector2Int cornerKey = new Vector2Int(x+1, z+1);
-                
-                if (!wallPositions.ContainsKey(cornerKey))
-                {
-                    CreateCorner(cornerPos, 90);
-                    wallPositions[cornerKey] = true;
-                }
-            }
-            
-            // Sol üst köşede L duvar olmalı mı?
-            if (!current.walls[0] && !current.walls[3] && current.walls[1] && up.walls[3])
-            {
-                Vector3 cornerPos = new Vector3(x * cellSize, 0, (z+1) * cellSize);
-                Vector2Int cornerKey = new Vector2Int(x, z+1);
-                
-                if (!wallPositions.ContainsKey(cornerKey))
-                {
-                    CreateCorner(cornerPos, 180);
-                    wallPositions[cornerKey] = true;
-                }
-            }
-            
-            // Sağ alt köşede L duvar olmalı mı?
-            if (!current.walls[1] && !current.walls[2] && current.walls[0] && right.walls[2])
-            {
-                Vector3 cornerPos = new Vector3((x+1) * cellSize, 0, z * cellSize);
-                Vector2Int cornerKey = new Vector2Int(x+1, z);
-                
-                if (!wallPositions.ContainsKey(cornerKey))
-                {
-                    CreateCorner(cornerPos, 0);
-                    wallPositions[cornerKey] = true;
-                }
-            }
-            
-            // Sol alt köşede L duvar olmalı mı?
-            if (!current.walls[2] && !current.walls[3] && current.walls[0] && current.walls[1])
-            {
-                Vector3 cornerPos = new Vector3(x * cellSize, 0, z * cellSize);
-                Vector2Int cornerKey = new Vector2Int(x, z);
-                
-                if (!wallPositions.ContainsKey(cornerKey))
-                {
-                    CreateCorner(cornerPos, -90);
-                    wallPositions[cornerKey] = true;
-                }
-            }
-        }
-    }
-
-    // Köşe L duvar prefabı oluşturan fonksiyon
-    void CreateCorner(Vector3 position, float rotationY)
-    {
-        Instantiate(lWallPrefab, position, Quaternion.Euler(0, rotationY, 0), transform);
-    }
-
-    // T-duvarları yerleştiren fonksiyon
-    void PlaceSpecialWalls()
-    {
-        for (int x = 0; x < width; x++)
-        {
-            for (int z = 0; z < height; z++)
-            {
-                Vector2Int pos = new Vector2Int(x, z);
-                Cell cell = maze[pos];
-                
-                // T-duvar gereken yerleri tespit et
-                CheckAndPlaceTWall(pos);
-            }
-        }
-    }
-    
-    // Belirtilen konumda T duvar gerekliliğini kontrol et ve yerleştir
-    void CheckAndPlaceTWall(Vector2Int pos)
-    {
-        int x = pos.x;
-        int z = pos.y;
-        Cell cell = maze[pos];
-        
-        // T duvar durumu: 3 duvar, 1 açık yol
-        int wallCount = 0;
-        int openDirection = -1;
-        
+        // Dört yönü de kontrol et (Kuzey, Doğu, Güney, Batı)
         for (int i = 0; i < 4; i++)
         {
-            if (cell.walls[i])
-                wallCount++;
-            else
-                openDirection = i;
+            // Komşu hücrenin koordinatlarını hesapla
+            int nx = cell.x + directions[i].x;
+            int ny = cell.y + directions[i].y;
+            
+            // Komşu hücrenin sınırlar içinde olup olmadığını kontrol et
+            if (nx >= 0 && nx < width && ny >= 0 && ny < height)
+            {
+                // Komşu hücrenin ziyaret edilmemiş olduğunu kontrol et
+                if (!maze[nx, ny].visited)
+                {
+                    neighbors.Add(maze[nx, ny]);
+                }
+            }
         }
         
-        if (wallCount == 3 && openDirection != -1)
+        return neighbors;
+    }
+    
+    /// <summary>
+    /// İki komşu hücre arasındaki duvarları kaldırır.
+    /// Bu, labirentte yollar oluşturur.
+    /// </summary>
+    /// <param name="current">Mevcut hücre</param>
+    /// <param name="next">Komşu hücre</param>
+    private void RemoveWalls(Cell current, Cell next)
+    {
+        // İki hücre arasındaki farkı hesapla
+        int dx = next.x - current.x;
+        int dy = next.y - current.y;
+        
+        // Eğer komşu hücre mevcut hücrenin kuzeyinde ise
+        if (dx == 0 && dy == 1)
         {
-            // Duvar yerleştirme koordinatlarını ve döndürme açısını hesapla
-            Vector3 tWallPos = new Vector3((x + 0.5f) * cellSize, 0, (z + 0.5f) * cellSize);
-            float rotation = 0;
-            
-            switch (openDirection)
+            current.walls[0] = false; // Mevcut hücrenin kuzey duvarını kaldır
+            next.walls[2] = false;    // Komşu hücrenin güney duvarını kaldır
+        }
+        // Eğer komşu hücre mevcut hücrenin doğusunda ise
+        else if (dx == 1 && dy == 0)
+        {
+            current.walls[1] = false; // Mevcut hücrenin doğu duvarını kaldır
+            next.walls[3] = false;    // Komşu hücrenin batı duvarını kaldır
+        }
+        // Eğer komşu hücre mevcut hücrenin güneyinde ise
+        else if (dx == 0 && dy == -1)
+        {
+            current.walls[2] = false; // Mevcut hücrenin güney duvarını kaldır
+            next.walls[0] = false;    // Komşu hücrenin kuzey duvarını kaldır
+        }
+        // Eğer komşu hücre mevcut hücrenin batısında ise
+        else if (dx == -1 && dy == 0)
+        {
+            current.walls[3] = false; // Mevcut hücrenin batı duvarını kaldır
+            next.walls[1] = false;    // Komşu hücrenin doğu duvarını kaldır
+        }
+    }
+    
+    /// <summary>
+    /// Labirentin fiziksel görünümünü oluşturur.
+    /// Zemin, duvarlar, köşe kolonları ve işaretçileri yerleştirir.
+    /// </summary>
+    private void BuildMaze()
+    {
+        // Eğer parent objeler yoksa oluştur
+        if (wallsParent == null)
+        {
+            GameObject wallsObj = new GameObject("Walls");
+            wallsParent = wallsObj.transform;
+            wallsParent.SetParent(transform); // transform.parent yerine SetParent kullan
+        }
+        
+        if (floorsParent == null)
+        {
+            GameObject floorsObj = new GameObject("Floors");
+            floorsParent = floorsObj.transform;
+            floorsParent.SetParent(transform);
+        }
+        
+        if (cornersParent == null)
+        {
+            GameObject cornersObj = new GameObject("Corners");
+            cornersParent = cornersObj.transform;
+            cornersParent.SetParent(transform);
+        }
+        
+        // Her hücre için zemin yerleştir
+        for (int x = 0; x < width; x++)
+        {
+            for (int y = 0; y < height; y++)
             {
-                case 0: rotation = 0; break;   // Kuzey açık
-                case 1: rotation = 90; break;  // Doğu açık
-                case 2: rotation = 180; break; // Güney açık
-                case 3: rotation = 270; break; // Batı açık
+                PlaceFloor(x, y);
             }
-            
-            Vector2Int tWallKey = new Vector2Int(x, z);
-            
-            // Daha önce bu pozisyona duvar yerleştirilmemişse T duvar ekle
-            if (!wallPositions.ContainsKey(tWallKey))
+        }
+        
+        // Her hücre için duvarları yerleştir
+        for (int x = 0; x < width; x++)
+        {
+            for (int y = 0; y < height; y++)
             {
-                Instantiate(tWallPrefab, tWallPos, Quaternion.Euler(0, rotation, 0), transform);
-                wallPositions[tWallKey] = true;
+                PlaceWalls(x, y);
+            }
+        }
+        
+        // Köşe kolonlarını yerleştir
+        PlaceCorners();
+        
+        // Başlangıç işaretçisini yerleştir
+        if (startMarker != null)
+        {
+            GameObject start = Instantiate(startMarker, CellToWorldPosition(startPos.x, startPos.y, 0.1f), Quaternion.identity);
+            start.transform.SetParent(transform);
+            start.name = "StartMarker";
+            
+            // MazeTrigger bileşeni ekle (yoksa)
+            MazeTrigger trigger = start.GetComponent<MazeTrigger>();
+            if (trigger == null)
+            {
+                trigger = start.AddComponent<MazeTrigger>();
+                trigger.type = MazeTrigger.TriggerType.Start;
+                
+                // GameManager referansını ayarla
+                GameManager gameManager = FindAnyObjectByType<GameManager>();
+                if (gameManager != null)
+                {
+                    trigger.gameManager = gameManager;
+                }
+            }
+        }
+        
+        // Bitiş işaretçisini yerleştir
+        if (endMarker != null)
+        {
+            GameObject end = Instantiate(endMarker, CellToWorldPosition(endPos.x, endPos.y, 0.1f), Quaternion.identity);
+            end.transform.SetParent(transform);
+            end.name = "EndMarker";
+            
+            // MazeTrigger bileşeni ekle (yoksa)
+            MazeTrigger trigger = end.GetComponent<MazeTrigger>();
+            if (trigger == null)
+            {
+                trigger = end.AddComponent<MazeTrigger>();
+                trigger.type = MazeTrigger.TriggerType.End;
+                
+                // GameManager referansını ayarla
+                GameManager gameManager = FindAnyObjectByType<GameManager>();
+                if (gameManager != null)
+                {
+                    trigger.gameManager = gameManager;
+                }
             }
         }
     }
     
-    // Başlangıç ve bitiş işaretleyicilerini yerleştiren fonksiyon
-    void PlaceStartAndEndMarkers()
+    /// <summary>
+    /// Belirtilen hücre konumunda zemin yerleştirir.
+    /// </summary>
+    /// <param name="x">Hücrenin x koordinatı</param>
+    /// <param name="y">Hücrenin y koordinatı</param>
+    private void PlaceFloor(int x, int y)
     {
-        // Başlangıç noktasının dünya koordinatları (sağ alt köşe)
-        Vector3 startPos = new Vector3(startPoint.x * cellSize + cellSize / 2, 0.1f, startPoint.y * cellSize + cellSize / 2);
+        if (floorPrefab != null)
+        {
+            // Zemin prefabını dünya konumuna yerleştir
+            GameObject floor = Instantiate(floorPrefab, CellToWorldPosition(x, y, 0), Quaternion.identity);
+            floor.transform.SetParent(floorsParent); // parent yerine SetParent kullan
+            floor.name = "Floor_" + x + "_" + y; // Tanımlayıcı isim ver
+        }
+    }
+    
+    /// <summary>
+    /// Belirtilen hücrenin duvarlarını yerleştirir.
+    /// Duvarlar, hücre veri yapısındaki wall[] dizisine göre yerleştirilir.
+    /// </summary>
+    /// <param name="x">Hücrenin x koordinatı</param>
+    /// <param name="y">Hücrenin y koordinatı</param>
+    private void PlaceWalls(int x, int y)
+    {
+        if (wallPrefab == null) return;
         
-        // Başlangıç işaretleyicisini yerleştir
-        GameObject startMarker = Instantiate(startMarkerPrefab, startPos, Quaternion.identity, transform);
-        startMarker.name = "BaşlangıçNoktası";
-        Debug.Log("Başlangıç noktası yerleştirildi: " + startPos);
+        // Null reference hatasını önlemek için kontrol et
+        if (x >= 0 && x < width && y >= 0 && y < height)
+        {
+            Cell cell = maze[x, y];
+            
+            // Hücrenin mevcut duvarlarını yerleştir
+            if (cell.walls[0]) // Kuzey duvarı
+            {
+                GameObject wall = Instantiate(wallPrefab, CellToWorldPosition(x, y, 0) + new Vector3(0, 0, cellSize/2), Quaternion.identity);
+                wall.transform.SetParent(wallsParent);
+                wall.name = "Wall_N_" + x + "_" + y;
+            }
+            
+            if (cell.walls[1]) // Doğu duvarı
+            {
+                GameObject wall = Instantiate(wallPrefab, CellToWorldPosition(x, y, 0) + new Vector3(cellSize/2, 0, 0), Quaternion.Euler(0, 90, 0));
+                wall.transform.SetParent(wallsParent);
+                wall.name = "Wall_E_" + x + "_" + y;
+            }
+            
+            if (cell.walls[2]) // Güney duvarı
+            {
+                GameObject wall = Instantiate(wallPrefab, CellToWorldPosition(x, y, 0) + new Vector3(0, 0, -cellSize/2), Quaternion.identity);
+                wall.transform.SetParent(wallsParent);
+                wall.name = "Wall_S_" + x + "_" + y;
+            }
+            
+            if (cell.walls[3]) // Batı duvarı
+            {
+                GameObject wall = Instantiate(wallPrefab, CellToWorldPosition(x, y, 0) + new Vector3(-cellSize/2, 0, 0), Quaternion.Euler(0, 90, 0));
+                wall.transform.SetParent(wallsParent);
+                wall.name = "Wall_W_" + x + "_" + y;
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Labirentteki köşe kolonlarını yerleştirir.
+    /// Duvar kesişim noktalarında veya labirent sınırlarında köşeler eklenir.
+    /// </summary>
+    private void PlaceCorners()
+    {
+        if (cornerPrefab == null) return;
         
-        // Bitiş noktasının dünya koordinatları (sol üst köşe)
-        Vector3 endPos = new Vector3(endPoint.x * cellSize + cellSize / 2, 0.1f, endPoint.y * cellSize + cellSize / 2);
+        // Köşe noktalarını duvar kesişimlerini kontrol ederek oluştur
+        for (int x = 0; x <= width; x++)
+        {
+            for (int y = 0; y <= height; y++)
+            {
+                // Köşe pozisyonunu hesapla (-0.5f ofset ile hücre köşelerine yerleştir)
+                Vector3 cornerPos = CellToWorldPosition(x - 0.5f, y - 0.5f, 0);
+                
+                // Bu noktaya köşe kolonu yerleştirilmeli mi kontrol et
+                bool placeCorner = false;
+                
+                try
+                {
+                    placeCorner = ShouldPlaceCorner(x, y);
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogError("Error in ShouldPlaceCorner: " + e.Message + " at x=" + x + ", y=" + y);
+                    continue; // Hata durumunda bu köşeyi atla
+                }
+                
+                if (placeCorner)
+                {
+                    GameObject corner = Instantiate(cornerPrefab, cornerPos, Quaternion.identity);
+                    corner.transform.SetParent(cornersParent);
+                    corner.name = "Corner_" + x + "_" + y;
+                }
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Belirtilen pozisyona köşe kolonu yerleştirilmeli mi kontrol eder.
+    /// Duvar kesişimleri ve labirent sınırlarını dikkate alır.
+    /// </summary>
+    /// <param name="x">Köşe noktasının x koordinatı</param>
+    /// <param name="y">Köşe noktasının y koordinatı</param>
+    /// <returns>Köşe kolonu yerleştirilmeli mi</returns>
+    private bool ShouldPlaceCorner(int x, int y)
+    {
+        // Köşe noktasının labirent sınırında olup olmadığını kontrol et
+        bool isAtBoundary = (x == 0 || x == width || y == 0 || y == height);
         
-        // Bitiş işaretleyicisini yerleştir
-        GameObject endMarker = Instantiate(endMarkerPrefab, endPos, Quaternion.identity, transform);
-        endMarker.name = "BitişNoktası";
-        Debug.Log("Bitiş noktası yerleştirildi: " + endPos);
+        if (isAtBoundary)
+        {
+            // Sınırlardaki özel durumları ele al
+            bool isCorner = (x == 0 && y == 0) || (x == width && y == 0) || 
+                           (x == 0 && y == height) || (x == width && y == height);
+            
+            if (isCorner)
+            {
+                return true; // Labirentin dört köşesine her zaman kolon yerleştir
+            }
+            
+            // Sınır boyunca duvar olup olmadığını kontrol et - İndeks kontrolü ekle
+            if (x == 0 && y > 0 && y < height)
+            {
+                return (y - 1 >= 0 && maze[0, y-1].walls[3]) || (y < height && maze[0, y].walls[3]);
+            }
+            if (x == width && y > 0 && y < height)
+            {
+                return (x > 0 && y - 1 >= 0 && x - 1 < width && maze[x-1, y-1].walls[1]) || 
+                       (x > 0 && y < height && x - 1 < width && maze[x-1, y].walls[1]);
+            }
+            if (y == 0 && x > 0 && x < width)
+            {
+                return (x - 1 >= 0 && maze[x-1, 0].walls[2]) || (x < width && maze[x, 0].walls[2]);
+            }
+            if (y == height && x > 0 && x < width)
+            {
+                return (y > 0 && x - 1 >= 0 && y - 1 < height && maze[x-1, y-1].walls[0]) || 
+                       (x < width && y > 0 && y - 1 < height && maze[x, y-1].walls[0]);
+            }
+            
+            return false;
+        }
+        else
+        {
+            // İç köşeler - komşu hücreleri kontrol et - İndeks kontrolü ekle
+            bool hasNorthEastCorner = (x > 0 && y > 0 && x - 1 < width && y - 1 < height && maze[x-1, y-1].walls[1] && maze[x-1, y-1].walls[0]);
+            bool hasNorthWestCorner = (x < width && y > 0 && y - 1 < height && maze[x, y-1].walls[3] && maze[x, y-1].walls[0]);
+            bool hasSouthEastCorner = (x > 0 && y < height && x - 1 < width && maze[x-1, y].walls[1] && maze[x-1, y].walls[2]);
+            bool hasSouthWestCorner = (x < width && y < height && maze[x, y].walls[3] && maze[x, y].walls[2]);
+            
+            return hasNorthEastCorner || hasNorthWestCorner || hasSouthEastCorner || hasSouthWestCorner;
+        }
+    }
+    
+    /// <summary>
+    /// Hücre koordinatlarını dünya koordinatlarına çevirir.
+    /// </summary>
+    /// <param name="x">Hücrenin x koordinatı</param>
+    /// <param name="y">Hücrenin y koordinatı</param>
+    /// <param name="heightOffset">Yükseklik ofseti</param>
+    /// <returns>Dünya koordinatı (Vector3)</returns>
+    private Vector3 CellToWorldPosition(float x, float y, float heightOffset)
+    {
+        // Hücre koordinatlarını dünya pozisyonuna çevir
+        return new Vector3(x * cellSize, heightOffset, y * cellSize);
+    }
+    
+    /// <summary>
+    /// Belirli bir seed ile labirent oluşturur.
+    /// Dışarıdan erişilebilen bir fonksiyondur.
+    /// </summary>
+    /// <param name="newSeed">Kullanılacak seed değeri</param>
+    public void GenerateMazeWithSeed(int newSeed)
+    {
+        seed = newSeed;
+        useRandomSeed = false; // Rastgele seed kullanımını devre dışı bırak
+        GenerateMaze();
+    }
+    
+    /// <summary>
+    /// Mevcut seed değerini döndürür.
+    /// </summary>
+    /// <returns>Aktif seed değeri</returns>
+    public int GetCurrentSeed()
+    {
+        return seed;
+    }
+    
+    /// <summary>
+    /// Labirent hücrelerine dışarıdan erişim için yardımcı metod
+    /// </summary>
+    /// <returns>Labirent grid'i</returns>
+    public bool IsCellWall(int x, int y, int direction)
+    {
+        if (x < 0 || x >= width || y < 0 || y >= height || direction < 0 || direction > 3)
+            return true; // Sınırların dışı
+            
+        return maze[x, y].walls[direction];
     }
 }
