@@ -13,6 +13,10 @@ public class MazeGenerator : MonoBehaviour
     public int width = 15;
     public int height = 15;
 
+    [Header("Trap Ayarları (Otomatik Yerleştirme)")]
+    public GameObject[] trapPrefabs;            // Tuzak prefabları
+    public int trapCount = 10;                  // Tuzak adeti
+
     private Transform mazeParent;               // Tüm instantiate'leri toplayacağımız parent
     private GameObject[,] verticalWalls;        // İç dikey duvar referansları
     private GameObject[,] horizontalWalls;      // İç yatay duvar referansları
@@ -48,6 +52,8 @@ public class MazeGenerator : MonoBehaviour
         GenerateInnerWalls();
         // 4) DFS ile labirent carve et
         CarveMaze();
+        // 5) Tuzakları rastgele hücrelere yerleştir
+        PlaceTraps();
     }
 
     // 15x15 grid üzerinde zemin karoları yerleştir
@@ -188,6 +194,47 @@ public class MazeGenerator : MonoBehaviour
 
                 DFS(nx, nz);
             }
+        }
+    }
+
+    // Labirent içindeki rastgele hücrelere tuzak prefablarını yerleştir.
+    void PlaceTraps()
+    {
+        // Aynı hücreye iki kez koymamızın önüne geçmek için bir set
+        HashSet<Vector2Int> usedCells = new HashSet<Vector2Int>();
+
+        int placed = 0;
+        // İstedğimiz sayı kadar tuzak atana kadar dön
+        while (placed < trapCount)
+        {
+            // Rastgele bir hücre seç(0..width-1, 0..height-1)
+            int x = Random.Range(0, width);
+            int z = Random.Range(0, height);
+            Vector2Int cell = new Vector2Int(x, z);
+
+            // Başlangıç ve bitiş hücrelerini atla
+            if ((x == 0 && z == 0) || (x == width - 1 && z == height - 1))
+            {
+                continue;
+            }
+            // Aynı hücreye tekrar atlamamak için kontrol et
+            if (usedCells.Contains(cell))
+            {
+                continue;
+            }
+
+            // Dizideki bir prefabı rastgele seç
+            GameObject prefab = trapPrefabs[Random.Range(0, trapPrefabs.Length)];
+
+            // Dünyadaki pozisyonunu hesapla (y = 0.5f biraz yukarıda)
+            Vector3 pos = new Vector3(x, 0.05f, z);
+
+            // Instantiate ile sahneye ekle, mazeParent altına koy
+            Instantiate(prefab, pos, Quaternion.identity, mazeParent);
+
+            // Kullanılan hücre olarak işaretle ve sayacı arttır
+            usedCells.Add(cell);
+            placed++;
         }
     }
 }

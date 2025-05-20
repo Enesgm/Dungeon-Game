@@ -2112,7 +2112,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 1, b: 1, a: 0.392}
+  m_Color: {r: 1, g: 1, b: 1, a: 0}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -2779,6 +2779,11 @@ MonoBehaviour:
   columnPrefab: {fileID: 3995058373404491631, guid: 3096f908eeaa3bf45b698926a7148f4e, type: 3}
   width: 15
   height: 15
+  trapPrefabs:
+  - {fileID: 6072955150435861673, guid: 09c839002abee6d4384d7f5dad5cff30, type: 3}
+  - {fileID: 5458487110855509844, guid: f06a26070a4ae5a459ddb06f74135a43, type: 3}
+  - {fileID: 9030251495412143845, guid: cff7ec2cd06a014418e9273f14e0faae, type: 3}
+  trapCount: 10
 --- !u!4 &1884420739
 Transform:
   m_ObjectHideFlags: 0
