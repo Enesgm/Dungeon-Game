@@ -13,6 +13,9 @@ public class MazeGenerator : MonoBehaviour
     public int width = 15;
     public int height = 15;
 
+    [Header("Koridor Genişliği")]
+    public float cellSize = 3f;
+
     [Header("Trap Ayarları (Otomatik Yerleştirme)")]
     public GameObject[] trapPrefabs;            // Tuzak prefabları
     public int trapCount = 10;                  // Tuzak adeti
@@ -63,7 +66,7 @@ public class MazeGenerator : MonoBehaviour
         {
             for (int z = 0; z < height; z++)
             {
-                Vector3 pos = new Vector3(x, 0, z);
+                Vector3 pos = new Vector3(x * cellSize, 0, z * cellSize);
                 Instantiate(floorPrefab, pos, Quaternion.identity, mazeParent);
             }
         }
@@ -72,11 +75,11 @@ public class MazeGenerator : MonoBehaviour
     // Labirentin etrafına duvar, köşe ve dolgu kolonlarını yerleştir
     void GenerateOuterWallsAndColumns()
     {
-        float half = 0.5f;
+        float half = cellSize * 0.5f;
         float leftX = -half;
-        float rightX = width - half;
+        float rightX = width * cellSize - half;
         float bottomZ = -half;
-        float topZ = height - half;
+        float topZ = height * cellSize - half;
 
         // - Köşeler -
         Instantiate(cornerPrefab, new Vector3(leftX, 1, bottomZ), Quaternion.identity, mazeParent);
@@ -87,29 +90,31 @@ public class MazeGenerator : MonoBehaviour
         // - Alt ve üst kenarlar + Dolgu kolonlar -
         for (int x = 0; x < width; x++)
         {
+            float worldX = x * cellSize;
             // Alt kenar duvarı
-            Instantiate(wallPrefab, new Vector3(x, 1, bottomZ), Quaternion.identity, mazeParent);
+            Instantiate(wallPrefab, new Vector3(worldX, 1, bottomZ), Quaternion.identity, mazeParent);
             // Alt kenar dolgu kolonu
-            Instantiate(columnPrefab, new Vector3(x + half, 1, bottomZ), Quaternion.identity, mazeParent);
+            Instantiate(columnPrefab, new Vector3(worldX + half, 1, bottomZ), Quaternion.identity, mazeParent);
 
             // Üst kenar duvarı
-            Instantiate(wallPrefab, new Vector3(x, 1, topZ), Quaternion.identity, mazeParent);
+            Instantiate(wallPrefab, new Vector3(worldX, 1, topZ), Quaternion.identity, mazeParent);
             // Üst kenar dolgu kolonu
-            Instantiate(columnPrefab, new Vector3(x + half, 1, topZ), Quaternion.identity, mazeParent);
+            Instantiate(columnPrefab, new Vector3(worldX + half, 1, topZ), Quaternion.identity, mazeParent);
         }
 
         // - Sol ve sağ kenarlar + Dolgu kolonları -
         for (int z = 0; z < height; z++)
         {
+            float worldZ = z * cellSize;
             // Sol kenar duvarı
-            Instantiate(wallPrefab, new Vector3(leftX, 1, z), Quaternion.Euler(0, 90, 0), mazeParent);
+            Instantiate(wallPrefab, new Vector3(leftX, 1, worldZ), Quaternion.Euler(0, 90, 0), mazeParent);
             // Sol kenar dolgu kolonu
-            Instantiate(columnPrefab, new Vector3(leftX, 1, z + half), Quaternion.identity, mazeParent);
+            Instantiate(columnPrefab, new Vector3(leftX, 1, worldZ + half), Quaternion.identity, mazeParent);
 
             // Sağ kenar duvarı
-            Instantiate(wallPrefab, new Vector3(rightX, 1, z), Quaternion.Euler(0, 90, 0), mazeParent);
+            Instantiate(wallPrefab, new Vector3(rightX, 1, worldZ), Quaternion.Euler(0, 90, 0), mazeParent);
             // Sağ kenar dolgu kolonu
-            Instantiate(columnPrefab, new Vector3(rightX, 1, z + half), Quaternion.identity, mazeParent);
+            Instantiate(columnPrefab, new Vector3(rightX, 1, worldZ + half), Quaternion.identity, mazeParent);
         }
     }
 
@@ -119,13 +124,14 @@ public class MazeGenerator : MonoBehaviour
         // 1) Dizileri oluştur
         verticalWalls = new GameObject[width + 1, height]; // 16, 15
         horizontalWalls = new GameObject[width, height + 1]; // 15, 16
+        float half = cellSize * 0.5f;
 
         // 2) Dikey iç duvarlar (x = 1... width - 1)
         for (int x = 1; x < width; x++)
         {
             for (int z = 0; z < height; z++)
             {
-                Vector3 pos = new Vector3(x - 0.5f, 1, z);
+                Vector3 pos = new Vector3(x * cellSize - half, 1, z * cellSize);
                 verticalWalls[x, z] = Instantiate(wallPrefab, pos, Quaternion.Euler(0, 90, 0), mazeParent);
             }
         }
@@ -135,7 +141,7 @@ public class MazeGenerator : MonoBehaviour
         {
             for (int z = 1; z < height; z++)
             {
-                Vector3 pos = new Vector3(x, 1, z - 0.5f);
+                Vector3 pos = new Vector3(x * cellSize, 1, z * cellSize - half);
                 horizontalWalls[x, z] = Instantiate(wallPrefab, pos, Quaternion.identity, mazeParent);
             }
         }
@@ -146,7 +152,7 @@ public class MazeGenerator : MonoBehaviour
         {
             for (int z = 1; z < height; z++)
             {
-                Vector3 colPos = new Vector3(x - 0.5f, 1, z - 0.5f);
+                Vector3 colPos = new Vector3(x * cellSize - half, 1, z * cellSize - half);
                 Instantiate(columnPrefab, colPos, Quaternion.identity, mazeParent);
             }
         }
@@ -200,9 +206,7 @@ public class MazeGenerator : MonoBehaviour
     // Labirent içindeki rastgele hücrelere tuzak prefablarını yerleştir.
     void PlaceTraps()
     {
-        // Aynı hücreye iki kez koymamızın önüne geçmek için bir set
-        HashSet<Vector2Int> usedCells = new HashSet<Vector2Int>();
-
+        var used = new HashSet<Vector2Int>();
         int placed = 0;
         // İstedğimiz sayı kadar tuzak atana kadar dön
         while (placed < trapCount)
@@ -210,7 +214,7 @@ public class MazeGenerator : MonoBehaviour
             // Rastgele bir hücre seç(0..width-1, 0..height-1)
             int x = Random.Range(0, width);
             int z = Random.Range(0, height);
-            Vector2Int cell = new Vector2Int(x, z);
+            var cell = new Vector2Int(x, z);
 
             // Başlangıç ve bitiş hücrelerini atla
             if ((x == 0 && z == 0) || (x == width - 1 && z == height - 1))
@@ -218,7 +222,7 @@ public class MazeGenerator : MonoBehaviour
                 continue;
             }
             // Aynı hücreye tekrar atlamamak için kontrol et
-            if (usedCells.Contains(cell))
+            if (used.Contains(cell))
             {
                 continue;
             }
@@ -227,13 +231,13 @@ public class MazeGenerator : MonoBehaviour
             GameObject prefab = trapPrefabs[Random.Range(0, trapPrefabs.Length)];
 
             // Dünyadaki pozisyonunu hesapla (y = 0.5f biraz yukarıda)
-            Vector3 pos = new Vector3(x, 0.05f, z);
+            Vector3 pos = new Vector3(x * cellSize, 0.05f, z * cellSize);
 
             // Instantiate ile sahneye ekle, mazeParent altına koy
             Instantiate(prefab, pos, Quaternion.identity, mazeParent);
 
             // Kullanılan hücre olarak işaretle ve sayacı arttır
-            usedCells.Add(cell);
+            used.Add(cell);
             placed++;
         }
     }

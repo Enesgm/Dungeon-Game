@@ -10,7 +10,8 @@ public class CameraFollow : MonoBehaviour
     {
         if (target == null) return;
         Vector3 desired = target.position + offset;
-        transform.position = Vector3.Lerp(transform.position, desired, smoothSpeed);
+        Vector3 velocity = Vector3.zero;
+        transform.position = Vector3.SmoothDamp(transform.position, desired, ref velocity, smoothSpeed);
         transform.LookAt(target);
     }
 }
